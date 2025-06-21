@@ -320,7 +320,7 @@ int main(int argc, const char* argv[])
                     uint16_t sr = (instr >> 9) & R_BITMASK;
                     uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
                     
-                    mem_write(reg[R_PC] + pc_offset, sr);
+                    mem_write(reg[R_PC] + pc_offset, reg[sr]);
                 }
 
                 break;
@@ -329,7 +329,7 @@ int main(int argc, const char* argv[])
                     uint16_t sr = (instr >> 9) & R_BITMASK;
                     uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
                     
-                    mem_write(mem_read(reg[R_PC + pc_offset]), reg[sr]);
+                    mem_write(mem_read(reg[R_PC] + pc_offset), reg[sr]);
                 }
 
                 break;
@@ -339,7 +339,7 @@ int main(int argc, const char* argv[])
                     uint16_t base_r = (instr >> 6) & R_BITMASK;
                     uint16_t offset = sign_extend(instr & 0x3F, 6);
 
-                    mem_write(reg[base_r] + offset, sr);
+                    mem_write(reg[base_r] + offset, reg[sr]);
                 }
 
                 break;
@@ -393,16 +393,10 @@ int main(int argc, const char* argv[])
                             uint16_t* c = memory + reg[R_R0];
                             while (*c)
                             {
-
-                                char f= *c & 0x7;
-                                putc(f, stdout);
-
-                                char s = *c & 0xFF00;
-                                if (s)
-                                {
-                                    putc(s, stdout);
-                                }
-
+                                char char1 = (*c) & 0xFF;
+                                putc(char1, stdout);
+                                char char2 = (*c) >> 8;
+                                if (char2) putc(char2, stdout);
                                 ++c;
                             }
                             fflush(stdout);
@@ -416,6 +410,7 @@ int main(int argc, const char* argv[])
                         }
                         break;
                 }
+                break;
             case OP_RES:
             case OP_RTI:
             default:
