@@ -5,6 +5,12 @@
 
 enum
 {
+    MR_KBSR = 0xFE00, /* keyboard status */
+    MR_KBDR = 0xFE02  /* keyboard data */
+};
+
+enum
+{
     TRAP_GETC = 0x20,  /* get character from keyboard, not echoed onto the terminal */
     TRAP_OUT = 0x21,   /* output a character */
     TRAP_PUTS = 0x22,  /* output a word string */
@@ -83,6 +89,62 @@ void update_flags(uint16_t r)
     }
 }
 
+uint16_t swap16(uint16_t x)
+{
+    return (x << 8) | (x >> 8);
+}
+
+void read_image_file(FILE* file)
+{
+    /* the origin tells us where in memory to place the image */
+    uint16_t origin;
+    fread(&origin, sizeof(origin), 1, file);
+    origin = swap16(origin);
+
+    /* we know the maximum file size so we only need one fread */
+    uint16_t max_read = MEMORY_MAX - origin;
+    uint16_t* p = memory + origin;
+    size_t read = fread(p, sizeof(uint16_t), max_read, file);
+
+    /* swap to little endian */
+    while (read-- > 0)
+    {
+        *p = swap16(*p);
+        ++p;
+    }
+}
+
+int read_image(const char* image_path)
+{
+    FILE* file = fopen(image_path, "rb");
+    if (!file) { return 0; };
+    read_image_file(file);
+    fclose(file);
+    return 1;
+}
+
+void mem_write(uint16_t address, uint16_t val)
+{
+    memory[address] = val;
+}
+
+uint16_t mem_read(uint16_t address)
+{
+    if (address == MR_KBSR)
+    {
+        if (check_key())
+        {
+            memory[MR_KBSR] = (1 << 15);
+            memory[MR_KBDR] = getchar();
+        }
+        else
+        {
+            memory[MR_KBSR] = 0;
+        }
+    }
+    return memory[address];
+}
+
 #define R_BITMASK 0x7
 #define BOOL_BITMASK 0x1
 
@@ -125,135 +187,160 @@ int main(int argc, const char* argv[])
         switch (op)
         {
             case OP_ADD:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t r1 = (instr >> 6) & R_BITMASK;
-                uint16_t imm_flag = (instr >> 5) & BOOL_BITMASK;
-                
-                if (imm_flag)
                 {
-                    uint16_t imm5 = sign_extend(instr & 0x1F, 5);
-                    reg[r0] = reg[r1] + imm5;
-                }
-                else
-                {
-                    uint16_t r2 = instr & R_BITMASK;
-                    reg[r0] = reg[r1] + reg[r2];
-                }
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t r1 = (instr >> 6) & R_BITMASK;
+                    uint16_t imm_flag = (instr >> 5) & BOOL_BITMASK;
+                    
+                    if (imm_flag)
+                    {
+                        uint16_t imm5 = sign_extend(instr & 0x1F, 5);
+                        reg[r0] = reg[r1] + imm5;
+                    }
+                    else
+                    {
+                        uint16_t r2 = instr & R_BITMASK;
+                        reg[r0] = reg[r1] + reg[r2];
+                    }
 
-                update_flags(r0);
+                    update_flags(r0);
+                }
                 break;
 
             case OP_AND:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t r1 = (instr >> 6) & R_BITMASK;
-                uint16_t imm_flag = (instr >> 5) & BOOL_BITMASK;
-                
-                if (imm_flag)
                 {
-                    uint16_t imm5 = sign_extend(instr & 0x1F, 5);
-                    reg[r0] = reg[r1] & imm5;
-                }
-                else
-                {
-                    uint16_t r2 = instr & R_BITMASK;
-                    reg[r0] = reg[r1] & reg[r2];
-                }
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t r1 = (instr >> 6) & R_BITMASK;
+                    uint16_t imm_flag = (instr >> 5) & BOOL_BITMASK;
+                    
+                    if (imm_flag)
+                    {
+                        uint16_t imm5 = sign_extend(instr & 0x1F, 5);
+                        reg[r0] = reg[r1] & imm5;
+                    }
+                    else
+                    {
+                        uint16_t r2 = instr & R_BITMASK;
+                        reg[r0] = reg[r1] & reg[r2];
+                    }
 
-                update_flags(r0);
+                    update_flags(r0);
+                }
                 break;
             case OP_NOT:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t r1 = (instr >> 6) & R_BITMASK;
-                
-                reg[r0] = ~r1;
+                {
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t r1 = (instr >> 6) & R_BITMASK;
+                    
+                    reg[r0] = ~r1;
 
-                update_flags(r0);
+                    update_flags(r0);
+                }
                 break;
             case OP_BR:
-                uint16_t n = (instr >> 11) & BOOL_BITMASK;
-                uint16_t z = (instr >> 10) & BOOL_BITMASK;
-                uint16_t p = (instr >> 9) & BOOL_BITMASK;
-
-                if (n && (reg[R_COND] == FL_NEG) || z && (reg[R_COND] == FL_ZRO) || p && (reg[R_COND] == FL_POS))
                 {
-                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
-                    reg[R_PC] += pc_offset;
-                }                            
-                
+                    uint16_t n = (instr >> 11) & BOOL_BITMASK;
+                    uint16_t z = (instr >> 10) & BOOL_BITMASK;
+                    uint16_t p = (instr >> 9) & BOOL_BITMASK;
+
+                    if (n && (reg[R_COND] == FL_NEG) || z && (reg[R_COND] == FL_ZRO) || p && (reg[R_COND] == FL_POS))
+                    {
+                        uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                        reg[R_PC] += pc_offset;
+                    }                            
+                }
                 break;
             case OP_JMP:
-                uint16_t base_r = (instr >> 6) & R_BITMASK;
-                reg[R_PC] = reg[base_r];
-            
-                break;
-            case OP_JSR:
-                reg[R_R7] = reg[R_PC];
-                uint16_t flag = (instr >> 11) & BOOL_BITMASK;
-                if (!flag)
                 {
                     uint16_t base_r = (instr >> 6) & R_BITMASK;
                     reg[R_PC] = reg[base_r];
-                } 
-                else 
+                }
+            
+                break;
+            case OP_JSR:
                 {
-                    uint16_t pc_offset = sign_extend(instr & 0x7FF, 11);
-                    reg[R_PC] = pc_offset + reg[R_R7];
+                    reg[R_R7] = reg[R_PC];
+                    uint16_t flag = (instr >> 11) & BOOL_BITMASK;
+                    if (!flag)
+                    {
+                        uint16_t base_r = (instr >> 6) & R_BITMASK;
+                        reg[R_PC] = reg[base_r];
+                    } 
+                    else 
+                    {
+                        uint16_t pc_offset = sign_extend(instr & 0x7FF, 11);
+                        reg[R_PC] = pc_offset + reg[R_R7];
+                    }
                 }
 
                 break;
             case OP_LD:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                {
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
-                reg[r0] = mem_read(reg[R_PC] + pc_offset);
-                update_flags(r0);
+                    reg[r0] = mem_read(reg[R_PC] + pc_offset);
+                    update_flags(r0);
+                }
 
                 break;
             case OP_LDI:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                {
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
-                reg[r0] = mem_read(mem_read(reg[R_PC] + pc_offset));
-                update_flags(r0);
+                    reg[r0] = mem_read(mem_read(reg[R_PC] + pc_offset));
+                    update_flags(r0);
+                }
                 break;
 
             case OP_LDR:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t base_r = (instr >> 6) & R_BITMASK;
-                uint16_t offset = sign_extend(instr & 0x3F, 6);
+                {
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t base_r = (instr >> 6) & R_BITMASK;
+                    uint16_t offset = sign_extend(instr & 0x3F, 6);
 
-                reg[r0] = mem_read(reg[base_r] + offset);
-                update_flags(r0);
+                    reg[r0] = mem_read(reg[base_r] + offset);
+                    update_flags(r0);
+                }
 
                 break;
             case OP_LEA:
-                uint16_t r0 = (instr >> 9) & R_BITMASK;
-                uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                {
+                    uint16_t r0 = (instr >> 9) & R_BITMASK;
+                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
-                reg[r0] = reg[R_PC] + pc_offset;
-                update_flags(r0);
+                    reg[r0] = reg[R_PC] + pc_offset;
+                    update_flags(r0);
+                }
 
                 break;
             case OP_ST:
-                uint16_t sr = (instr >> 9) & R_BITMASK;
-                uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
-                
-                mem_write(reg[R_PC] + pc_offset, sr);
+                {
+                    uint16_t sr = (instr >> 9) & R_BITMASK;
+                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                    
+                    mem_write(reg[R_PC] + pc_offset, sr);
+                }
 
                 break;
             case OP_STI:
-                uint16_t sr = (instr >> 9) & R_BITMASK;
-                uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
-                
-                mem_write(mem_read(reg[R_PC + pc_offset]), reg[sr]);
+                {
+                    uint16_t sr = (instr >> 9) & R_BITMASK;
+                    uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+                    
+                    mem_write(mem_read(reg[R_PC + pc_offset]), reg[sr]);
+                }
 
                 break;
             case OP_STR:
-                uint16_t sr = (instr >> 9) & R_BITMASK;
-                uint16_t base_r = (instr >> 6) & R_BITMASK;
-                uint16_t offset = sign_extend(instr & 0x3F, 6);
+                {
+                    uint16_t sr = (instr >> 9) & R_BITMASK;
+                    uint16_t base_r = (instr >> 6) & R_BITMASK;
+                    uint16_t offset = sign_extend(instr & 0x3F, 6);
 
-                mem_write(reg[base_r] + offset, sr);
+                    mem_write(reg[base_r] + offset, sr);
+                }
 
                 break;
             case OP_TRAP:
@@ -262,29 +349,71 @@ int main(int argc, const char* argv[])
                 switch (instr & 0xFF)
                 {
                     case TRAP_GETC:
-                        @{TRAP GETC}
+                        {
+                            reg[R_R0] = (uint16_t) getchar();
+                            update_flags(R_R0);
+                        }
+
                         break;
                     case TRAP_OUT:
-                        @{TRAP OUT}
+                        {
+                            char c = reg[R_R0];
+                            putc(c, stdout);
+                            fflush(stdout);
+                        }
+
                         break;
                     case TRAP_PUTS:
-                        uint16_t* c = memory + reg[R_R0];
-                        while (*c)
                         {
-                            putc((char)*c, stdout);
-                            ++c;
+                            uint16_t* c = memory + reg[R_R0];
+                            while (*c)
+                            {
+                                putc((char)*c, stdout);
+                                ++c;
+                            }
+                            fflush(stdout);
                         }
-                        fflush(stdout);
 
                         break;
                     case TRAP_IN:
-                        @{TRAP IN}
+                        {
+                            printf("Enter a character: ");
+
+                            char c = (uint16_t) getchar();
+                            putc(c, stdout);
+                            fflush(stdout);
+                            reg[R_R0] = (uint16_t)c;
+
+                            update_flags(R_R0);
+                        }
+
                         break;
                     case TRAP_PUTSP:
-                        @{TRAP PUTSP}
+                        {
+                            uint16_t* c = memory + reg[R_R0];
+                            while (*c)
+                            {
+
+                                char f= *c & 0x7;
+                                putc(f, stdout);
+
+                                char s = *c & 0xFF00;
+                                if (s)
+                                {
+                                    putc(s, stdout);
+                                }
+
+                                ++c;
+                            }
+                            fflush(stdout);
+                        }
+
                         break;
                     case TRAP_HALT:
-                        @{TRAP HALT}
+                        {
+                            puts("HALT");
+                            fflush(stdout);
+                        }
                         break;
                 }
             case OP_RES:
@@ -294,5 +423,5 @@ int main(int argc, const char* argv[])
                 break;
         }
     }
-    @{Shutdown}
+    restore_input_buffering();
 }
