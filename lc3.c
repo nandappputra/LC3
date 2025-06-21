@@ -232,7 +232,7 @@ int main(int argc, const char* argv[])
                     uint16_t r0 = (instr >> 9) & R_BITMASK;
                     uint16_t r1 = (instr >> 6) & R_BITMASK;
                     
-                    reg[r0] = ~r1;
+                    reg[r0] = ~reg[r1];
 
                     update_flags(r0);
                 }
